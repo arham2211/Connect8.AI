@@ -48,7 +48,7 @@ Only one power-up can be active at a time. Use them wisely!
 ## Demo
 Watch a short demo of Connect8.AI in action:
 
-[View Demo Video](https://github.com/arham2211/Connect8.AI/demo_video/demo_video.mp4?raw=true)
+[View Demo Video](https://github.com/arham2211/Connect8.AI/blob/master/demo_video/demo_video.mp4?raw=true)
 
 ## Development
 
@@ -77,10 +77,6 @@ To contribute:
 2. Create a new branch (`feature-xyz`)
 3. Commit your changes
 4. Open a pull request
-
-
-
-
 
 
 
