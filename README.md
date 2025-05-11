@@ -48,7 +48,7 @@ Only one power-up can be active at a time. Use them wisely!
 ## Demo
 Watch a short demo of Connect8.AI in action:
 
-[![Connect8.AI Demo Video](demo_vide/demo_video.mp4)
+[![Connect8.AI Demo Video](demo_video/demo_video.mp4)
 
 *(Click the image above to watch the gameplay video)*
 
