@@ -28,6 +28,7 @@ DARK_GRAY = (66, 66, 66)
 LIGHT_GRAY = (224, 224, 224)
 LIGHT_BLUE = (80, 150, 255)
 LIGHT_GREEN = (144, 238, 144)  # Light green for column hover
+PURPLE = (148, 0, 211)  # Purple for gravity off mode
 
 # Animation Constants
 DROP_ANIMATION_SPEED = 20  # Speed of piece dropping animation
@@ -40,7 +41,7 @@ LARGE_FONT = pygame.font.SysFont('Arial', 36)
 TITLE_FONT = pygame.font.SysFont('Arial', 48, bold=True)  # Reduced from 60 to fit better
 
 # Game Settings
-CONNECT_N = 8  # Default, can be 8 or 9
+CONNECT_N = 8  # Default, always 8 now
 GRAVITY_MODE = True
 MAX_AI_THINK_TIME = 3.0
 
@@ -52,7 +53,7 @@ HEIGHT = (ROWS + 1) * SQUARE_SIZE + 100  # Extra space for UI elements
 
 # Initialize screen with default dimensions
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption('Connect 8')
+pygame.display.set_caption('Connect8.AI')
 
 class Button:
     def __init__(self, x, y, width, height, text, color, hover_color, text_color=WHITE):
@@ -180,10 +181,12 @@ class Connect8Game:
         self.game_over = False
         self.winner = None
         self.player_powerups = {
-            'column_remover': PowerUp('column_remover', GREEN, False)
+            'column_remover': PowerUp('column_remover', GREEN, False),
+            'gravity_off': PowerUp('gravity_off', PURPLE, False)
         }
         self.ai_powerups = {
-            'column_remover': PowerUp('column_remover', GREEN, False)
+            'column_remover': PowerUp('column_remover', GREEN, False),
+            'gravity_off': PowerUp('gravity_off', PURPLE, False)
         }
         self.ai_difficulty = 'easy'  # Default to easy
         self.gravity_mode = GRAVITY_MODE
@@ -195,7 +198,9 @@ class Connect8Game:
         self.ai_move = None
         self.animated_pieces = []
         self.column_remover_active = False
+        self.gravity_off_active = False
         self.hovered_column = -1
+        self.hovered_row = -1
         self.powerup_notification = None
         self.powerup_notification_time = 0
         self.switch_to_ai_after_animation = False
@@ -215,7 +220,9 @@ class Connect8Game:
         self.ai_move = None
         self.animated_pieces = []
         self.column_remover_active = False
+        self.gravity_off_active = False
         self.hovered_column = -1
+        self.hovered_row = -1
         self.powerup_notification = None
         self.powerup_notification_time = 0
         self.switch_to_ai_after_animation = False
@@ -223,10 +230,12 @@ class Connect8Game:
         self.lock_player_input = False
         self.ai_thinking_start_time = 0
         self.player_powerups = {
-            'column_remover': PowerUp('column_remover', GREEN, False)
+            'column_remover': PowerUp('column_remover', GREEN, False),
+            'gravity_off': PowerUp('gravity_off', PURPLE, False)
         }
         self.ai_powerups = {
-            'column_remover': PowerUp('column_remover', GREEN, False)
+            'column_remover': PowerUp('column_remover', GREEN, False),
+            'gravity_off': PowerUp('gravity_off', PURPLE, False)
         }
         
     def toggle_gravity_mode(self):
@@ -237,8 +246,21 @@ class Connect8Game:
         self.ai_difficulty = difficulty
         self.reset_game()
         
-    def drop_piece(self, col, piece, animate=True):
-        if self.gravity_mode:
+    def drop_piece(self, col, piece, row=None, animate=True):
+        if row is not None:  # Direct placement (gravity off mode)
+            if self.board[row][col] == 0:
+                if animate:
+                    # Create animated piece with specific row target
+                    self.animated_pieces.append(AnimatedPiece(col, row, piece, (row + 1) * SQUARE_SIZE - SQUARE_SIZE / 2))
+                    self.last_move = (row, col)
+                    return True, row
+                else:
+                    # Immediate placement without animation
+                    self.board[row][col] = piece
+                    self.last_move = (row, col)
+                    return True, row
+            return False, -1
+        elif self.gravity_mode:
             # Standard mode - piece falls to bottom
             for row in range(ROWS-1, -1, -1):
                 if self.board[row][col] == 0:
@@ -277,17 +299,38 @@ class Connect8Game:
                 # When animation is done, update the board
                 if 0 <= piece.target_row < ROWS and 0 <= piece.col < COLS:
                     self.board[piece.target_row][piece.col] = piece.piece
+                    
+                    # Check for win immediately after the piece lands and updates the board
+                    if self.check_win(piece.piece):
+                        self.game_over = True
+                        self.winner = 1 if piece.piece == self.player_piece else 2
+                        
                 self.animated_pieces.remove(piece)
                 
-    def is_valid_location(self, col):
+    def is_valid_location(self, col, row=None):
+        # For gravity_off mode, check if specific cell is valid
+        if row is not None:
+            return 0 <= row < ROWS and 0 <= col < COLS and self.board[row][col] == 0
+        
+        # For regular mode, check if column has space
         return col >= 0 and col < COLS and self.board[0][col] == 0
         
     def get_valid_locations(self):
+        # For regular mode
         valid_locations = []
         for col in range(COLS):
             if self.is_valid_location(col):
                 valid_locations.append(col)
         return valid_locations
+    
+    def get_valid_cells(self):
+        # For gravity off mode, return all empty cells as (row, col) tuples
+        valid_cells = []
+        for row in range(ROWS):
+            for col in range(COLS):
+                if self.board[row][col] == 0:
+                    valid_cells.append((row, col))
+        return valid_cells
     
     def is_column_empty(self, col):
         """Check if a column is completely empty"""
@@ -304,7 +347,7 @@ class Connect8Game:
             return True
         return False
     
-    def use_powerup(self, powerup_type, col=None):
+    def use_powerup(self, powerup_type, col=None, row=None):
         powerups = self.player_powerups if self.turn == 0 else self.ai_powerups
         
         if powerup_type == 'column_remover' and powerups['column_remover'].active:
@@ -313,18 +356,24 @@ class Connect8Game:
                 if success:
                     powerups['column_remover'].deactivate()
                     return True
+        elif powerup_type == 'gravity_off' and powerups['gravity_off'].active:
+            # When activated, this will be handled in the main game logic
+            # The deactivation happens after a piece is placed
+            return True
         
         return False
     
     def check_for_powerup(self):
         if random.random() < self.powerup_probability:
-            powerup_type = 'column_remover'
+            # Randomly choose between column remover and gravity off
+            powerup_type = random.choice(['column_remover', 'gravity_off'])
             powerups = self.player_powerups if self.turn == 0 else self.ai_powerups
             powerups[powerup_type].activate()
             
             # Set notification
             player_type = "Player" if self.turn == 0 else "AI"
-            self.powerup_notification = f"{player_type} got a Column Remover"
+            powerup_name = "Column Remover" if powerup_type == 'column_remover' else "Gravity Off"
+            self.powerup_notification = f"{player_type} got a {powerup_name}"
             self.powerup_notification_time = time.time()
             
             return True, powerup_type
@@ -571,24 +620,86 @@ class Connect8Game:
     
     def get_easy_move(self):
         """Easy difficulty: Random valid move"""
+        # If gravity off is active, choose a random empty cell
+        if self.ai_powerups['gravity_off'].active and random.random() > 0.3:  # 70% chance to use gravity off
+            valid_cells = self.get_valid_cells()
+            if valid_cells:
+                row, col = random.choice(valid_cells)
+                return col, row
+        
+        # Otherwise use regular gravity mode
         valid_locations = self.get_valid_locations()
         if valid_locations:
-            return random.choice(valid_locations)
-        return None
+            return random.choice(valid_locations), None
+        return None, None
     
     def get_medium_move(self):
         """Medium difficulty: Minimax with limited depth (3)"""
+        # If gravity off is active, use it sometimes
+        if self.ai_powerups['gravity_off'].active and random.random() > 0.3:  # 70% chance to use gravity off
+            valid_cells = self.get_valid_cells()
+            if valid_cells:
+                # Try to find strategic places instead of random
+                best_cell = None
+                best_score = -math.inf
+                
+                for row, col in valid_cells:
+                    # Try placing a piece here
+                    sim_board = np.copy(self.board)
+                    sim_board[row][col] = self.ai_piece
+                    score = self.score_position_sim(sim_board, self.ai_piece)
+                    
+                    if score > best_score:
+                        best_score = score
+                        best_cell = (row, col)
+                
+                if best_cell:
+                    return best_cell[1], best_cell[0]  # Return as col, row
+            
         try:
             start_time = time.time()
             # Create a simulation board - don't modify the game board
             sim_board = np.copy(self.board)
             col, _ = self.minimax(3, -math.inf, math.inf, True, start_time, sim_board)
-            return col
+            return col, None
         except TimeoutError:
             return self.get_easy_move()
     
     def get_hard_move(self):
         """Hard difficulty: Full Minimax with Alpha-Beta Pruning"""
+        # If gravity off is active, use it strategically
+        if self.ai_powerups['gravity_off'].active and random.random() > 0.2:  # 80% chance to use gravity off
+            valid_cells = self.get_valid_cells()
+            if valid_cells:
+                best_cell = None
+                best_score = -math.inf
+                
+                # Deeply analyze each possible cell
+                for row, col in valid_cells:
+                    sim_board = np.copy(self.board)
+                    sim_board[row][col] = self.ai_piece
+                    
+                    # Check if this is a winning move
+                    if self.check_win_sim(sim_board, self.ai_piece):
+                        return col, row  # Immediate win
+                    
+                    # Check if this blocks a player win
+                    for r, c in valid_cells:
+                        if r != row or c != col:  # Don't check the same cell
+                            test_board = np.copy(self.board)
+                            test_board[r][c] = self.player_piece
+                            if self.check_win_sim(test_board, self.player_piece):
+                                # This is a critical blocking move
+                                return c, r
+                    
+                    score = self.score_position_sim(sim_board, self.ai_piece)
+                    if score > best_score:
+                        best_score = score
+                        best_cell = (row, col)
+                
+                if best_cell:
+                    return best_cell[1], best_cell[0]  # Return as col, row
+        
         try:
             start_time = time.time()
             # Use iterative deepening to ensure we always have a move
@@ -609,7 +720,7 @@ class Connect8Game:
                 except TimeoutError:
                     break
             
-            return best_col
+            return best_col, None
         except TimeoutError:
             return self.get_medium_move()
     
@@ -631,10 +742,10 @@ class Connect8Game:
                 if opponent_columns:
                     col = random.choice(opponent_columns)
                     self.use_powerup('column_remover', col)
-                    self.ai_move = None  # AI used powerup
+                    self.ai_move = None, None  # AI used powerup
                     return
             
-            # Make a regular move
+            # Make a regular move or use gravity off
             if self.ai_difficulty == 'easy':
                 self.ai_move = self.get_easy_move()
             elif self.ai_difficulty == 'medium':
@@ -649,9 +760,9 @@ class Connect8Game:
             # Fallback to random move if there's an error
             valid_locations = self.get_valid_locations()
             if valid_locations:
-                self.ai_move = random.choice(valid_locations)
+                self.ai_move = random.choice(valid_locations), None
             else:
-                self.ai_move = None  # No valid moves
+                self.ai_move = None, None  # No valid moves
         finally:
             self.ai_thinking = False
     
@@ -674,6 +785,18 @@ class Connect8Game:
             remove_text = FONT.render("✖", True, WHITE)
             text_rect = remove_text.get_rect(center=button_rect.center)
             screen.blit(remove_text, text_rect)
+        
+        # Draw cell hover effect when gravity off mode is active
+        if self.gravity_off_active and 0 <= self.hovered_row < ROWS and 0 <= self.hovered_column < COLS:
+            if self.board[self.hovered_row][self.hovered_column] == 0:  # Only highlight empty cells
+                cell_rect = pygame.Rect(
+                    self.hovered_column * SQUARE_SIZE, 
+                    (self.hovered_row + 1) * SQUARE_SIZE, 
+                    SQUARE_SIZE, SQUARE_SIZE
+                )
+                cell_surface = pygame.Surface((SQUARE_SIZE, SQUARE_SIZE), pygame.SRCALPHA)
+                cell_surface.fill((148, 0, 211, 80))  # Purple with transparency
+                screen.blit(cell_surface, cell_rect)
         
         # Draw circles for empty spots and pieces
         for c in range(COLS):
@@ -707,8 +830,19 @@ class Connect8Game:
             y = int((r + 1) * SQUARE_SIZE + SQUARE_SIZE / 2)
             pygame.draw.circle(screen, WHITE, (x, y), RADIUS + 3, 2)
     
-    def draw_hover_piece(self, screen, col):
-        if 0 <= col < COLS and not self.game_over and not self.column_remover_active and not self.lock_player_input:
+    def draw_hover_piece(self, screen, col, row=None):
+        if self.gravity_off_active and row is not None:
+            # Gravity off mode - show piece at mouse hover position
+            if 0 <= col < COLS and 0 <= row < ROWS and self.board[row][col] == 0:
+                x = int(col * SQUARE_SIZE + SQUARE_SIZE / 2)
+                y = int((row + 1) * SQUARE_SIZE + SQUARE_SIZE / 2)
+                piece_color = RED if self.turn == 0 else YELLOW
+                # Draw with transparency for hover effect
+                s = pygame.Surface((RADIUS*2+4, RADIUS*2+4), pygame.SRCALPHA)
+                pygame.draw.circle(s, (*pygame.Color(piece_color)[:3], 180), (RADIUS+2, RADIUS+2), RADIUS)
+                screen.blit(s, (x-RADIUS-2, y-RADIUS-2))
+        elif 0 <= col < COLS and not self.game_over and not self.column_remover_active and not self.lock_player_input:
+            # Regular mode - show piece at top of column
             x = int(col * SQUARE_SIZE + SQUARE_SIZE / 2)
             piece_color = RED if self.turn == 0 else YELLOW
             # Draw with transparency for hover effect
@@ -729,14 +863,12 @@ class Connect8Game:
         
         # Show compact game info at bottom
         title_text = LARGE_FONT.render(f"CONNECT {self.connect_n}", True, WHITE)
-        subtitle_text = MEDIUM_FONT.render(f"Connect {self.connect_n} to win!", True, LIGHT_BLUE)
         screen.blit(title_text, (WIDTH // 2 - title_text.get_width() // 2, HEIGHT - 80))
-        screen.blit(subtitle_text, (WIDTH // 2 - subtitle_text.get_width() // 2, HEIGHT - 40))
         
-        # Show powerup status with improved styling
+        # Show powerup status with improved styling - Column Remover
         if self.player_powerups['column_remover'].active:
             # Create a styled button/banner for the powerup
-            powerup_rect = pygame.Rect(20, HEIGHT - 70, 200, 50)
+            powerup_rect = pygame.Rect(20, HEIGHT - 70, 150, 50)
             pygame.draw.rect(screen, (0, 100, 0), powerup_rect, border_radius=10)  # Dark green background
             pygame.draw.rect(screen, GREEN, powerup_rect, 2, border_radius=10)  # Bright green border
             
@@ -747,10 +879,10 @@ class Connect8Game:
             
             if not self.column_remover_active:
                 # Create button for activation
-                activate_rect = pygame.Rect(20, HEIGHT - 30, 200, 25)
+                activate_rect = pygame.Rect(20, HEIGHT - 30, 150, 25)
                 pygame.draw.rect(screen, (0, 150, 0), activate_rect, border_radius=8)
                 
-                activate_text = FONT.render("Click Here to Activate", True, WHITE)
+                activate_text = FONT.render("Activate", True, WHITE)
                 screen.blit(activate_text, (activate_rect.centerx - activate_text.get_width() // 2, 
                                           activate_rect.y + 4))
                 
@@ -758,15 +890,50 @@ class Connect8Game:
                 self.column_remover_button_rect = activate_rect
             else:
                 # Create button for deactivation
-                deactivate_rect = pygame.Rect(20, HEIGHT - 30, 200, 25)
+                deactivate_rect = pygame.Rect(20, HEIGHT - 30, 150, 25)
                 pygame.draw.rect(screen, (150, 0, 0), deactivate_rect, border_radius=8)
                 
-                deactivate_text = FONT.render("Click to Cancel", True, WHITE)
+                deactivate_text = FONT.render("Cancel", True, WHITE)
                 screen.blit(deactivate_text, (deactivate_rect.centerx - deactivate_text.get_width() // 2, 
                                             deactivate_rect.y + 4))
                 
                 # Store the deactivation button rect
                 self.column_remover_button_rect = deactivate_rect
+        
+        # Show powerup status - Gravity Off
+        if self.player_powerups['gravity_off'].active:
+            # Create a styled button/banner for the powerup
+            powerup_rect = pygame.Rect(180, HEIGHT - 70, 150, 50)
+            pygame.draw.rect(screen, (70, 0, 120), powerup_rect, border_radius=10)  # Dark purple background
+            pygame.draw.rect(screen, PURPLE, powerup_rect, 2, border_radius=10)  # Bright purple border
+            
+            # Text for better visibility
+            powerup_text = MEDIUM_FONT.render("Gravity Off", True, WHITE)
+            screen.blit(powerup_text, (powerup_rect.centerx - powerup_text.get_width() // 2, 
+                                      powerup_rect.y + 8))
+            
+            if not self.gravity_off_active:
+                # Create button for activation
+                activate_rect = pygame.Rect(180, HEIGHT - 30, 150, 25)
+                pygame.draw.rect(screen, (100, 0, 180), activate_rect, border_radius=8)
+                
+                activate_text = FONT.render("Activate", True, WHITE)
+                screen.blit(activate_text, (activate_rect.centerx - activate_text.get_width() // 2, 
+                                          activate_rect.y + 4))
+                
+                # Store the activation button rect for click detection
+                self.gravity_off_button_rect = activate_rect
+            else:
+                # Create button for deactivation
+                deactivate_rect = pygame.Rect(180, HEIGHT - 30, 150, 25)
+                pygame.draw.rect(screen, (150, 0, 0), deactivate_rect, border_radius=8)
+                
+                deactivate_text = FONT.render("Cancel", True, WHITE)
+                screen.blit(deactivate_text, (deactivate_rect.centerx - deactivate_text.get_width() // 2, 
+                                            deactivate_rect.y + 4))
+                
+                # Store the deactivation button rect
+                self.gravity_off_button_rect = deactivate_rect
         
         # Show FPS and AI level
         fps_text = FONT.render(f"FPS: {int(clock.get_fps())}", True, WHITE)
@@ -815,6 +982,11 @@ class Connect8Game:
         # Draw instructions for column remover if active
         if self.column_remover_active:
             instructions = MEDIUM_FONT.render("Hover over a column to remove it", True, GREEN)
+            screen.blit(instructions, (WIDTH // 2 - instructions.get_width() // 2, 20))
+        
+        # Draw instructions for gravity off if active
+        if self.gravity_off_active:
+            instructions = MEDIUM_FONT.render("Click anywhere on the board to place your piece", True, PURPLE)
             screen.blit(instructions, (WIDTH // 2 - instructions.get_width() // 2, 20))
         
         # Draw notification for powerups
@@ -886,9 +1058,8 @@ def custom_grid_menu():
     menu = True
     
     # Create input boxes
-    rows_input = InputBox(WIDTH//2 - 100, HEIGHT//2 - 120, 200, 40, str(ROWS), 'Number of Rows (3-19):')
-    cols_input = InputBox(WIDTH//2 - 100, HEIGHT//2, 200, 40, str(COLS), 'Number of Columns (3-23):')
-    connect_n_input = InputBox(WIDTH//2 - 100, HEIGHT//2 + 120, 200, 40, str(CONNECT_N), 'Connect N (3-10):')
+    rows_input = InputBox(WIDTH//2 - 100, HEIGHT//2 - 120, 200, 40, str(ROWS), 'Number of Rows (10-19):')
+    cols_input = InputBox(WIDTH//2 - 100, HEIGHT//2, 200, 40, str(COLS), 'Number of Columns (16-23):')
     
     # Create buttons
     button_width = 250
@@ -918,10 +1089,9 @@ def custom_grid_menu():
                 pygame.quit()
                 sys.exit()
                 
-            # Handle input box events
+            # Handle input box events for rows and cols only
             rows_input.handle_event(event)
             cols_input.handle_event(event)
-            connect_n_input.handle_event(event)
             
             if event.type == pygame.MOUSEBUTTONDOWN:
                 mouse_pos = pygame.mouse.get_pos()
@@ -931,20 +1101,14 @@ def custom_grid_menu():
                         # Get values from input boxes
                         new_rows = int(rows_input.text)
                         new_cols = int(cols_input.text)
-                        new_connect_n = int(connect_n_input.text)
                         
-                        # Validate inputs
-                        new_rows = max(3, min(19, new_rows))  # Min 3, max 19 rows
-                        new_cols = max(3, min(23, new_cols))  # Min 3, max 23 columns
-                        new_connect_n = max(3, min(10, new_connect_n))  # Min 3, max 10 connect
-                        
-                        # Ensure connect_n is not larger than rows or columns
-                        new_connect_n = min(new_connect_n, min(new_rows, new_cols))
+                        # Validate inputs with new minimum values
+                        new_rows = max(10, min(19, new_rows))  # Min 10, max 19 rows
+                        new_cols = max(16, min(23, new_cols))  # Min 16, max 23 columns
                         
                         # Apply new settings
                         ROWS = new_rows
                         COLS = new_cols
-                        CONNECT_N = new_connect_n
                         
                         # Update screen dimensions
                         WIDTH = COLS * SQUARE_SIZE
@@ -952,7 +1116,7 @@ def custom_grid_menu():
                         
                         # Resize the screen
                         screen = pygame.display.set_mode((WIDTH, HEIGHT))
-                        pygame.display.set_caption(f'Connect {CONNECT_N}')
+                        pygame.display.set_caption('Connect8.AI')
                         
                         return
                     except ValueError:
@@ -968,14 +1132,11 @@ def custom_grid_menu():
         # Update input boxes
         rows_input.update()
         cols_input.update()
-        connect_n_input.update()
         
         # Draw input boxes
         rows_input.draw(screen)
         cols_input.draw(screen)
-        connect_n_input.draw(screen)
         
-        # Draw buttons
         mouse_pos = pygame.mouse.get_pos()
         
         save_button.check_hover(mouse_pos)
@@ -983,10 +1144,6 @@ def custom_grid_menu():
         
         cancel_button.check_hover(mouse_pos)
         cancel_button.draw(screen)
-        
-        # Add helpful note
-        note_text = FONT.render("Note: Connect N value cannot exceed board dimensions", True, LIGHT_GRAY)
-        screen.blit(note_text, (WIDTH//2 - note_text.get_width()//2, HEIGHT//2 + 170))
         
         pygame.display.update()
         clock.tick(60)
@@ -1020,7 +1177,7 @@ def main_menu():
         screen.fill(DARK_BLUE)
         
         # Draw titles with adjusted font size and position
-        title_text = TITLE_FONT.render(f"CONNECT {CONNECT_N} WITH AI", True, WHITE)
+        title_text = TITLE_FONT.render("CONNECT 8", True, WHITE)
         subtitle_text = MEDIUM_FONT.render("A Strategic Board Game with Adaptive AI", True, LIGHT_BLUE)
         
         screen.blit(title_text, (WIDTH//2 - title_text.get_width()//2, title_y))
@@ -1032,9 +1189,7 @@ def main_menu():
         
         # Display grid size info
         grid_info = MEDIUM_FONT.render(f"Grid Size: {ROWS}x{COLS}", True, LIGHT_BLUE)
-        connect_info = MEDIUM_FONT.render(f"Connect {CONNECT_N} to win", True, LIGHT_BLUE)
         screen.blit(grid_info, (WIDTH//2 - grid_info.get_width()//2, start_y - 110))
-        screen.blit(connect_info, (WIDTH//2 - connect_info.get_width()//2, start_y - 80))
         
         mouse_pos = pygame.mouse.get_pos()
         
@@ -1114,9 +1269,11 @@ def play_game():
     while game_running:
         mouse_pos = pygame.mouse.get_pos()
         col = int(mouse_pos[0] // SQUARE_SIZE) if mouse_pos[0] < WIDTH else -1
+        row = int((mouse_pos[1] - SQUARE_SIZE) // SQUARE_SIZE) if SQUARE_SIZE <= mouse_pos[1] < (ROWS + 1) * SQUARE_SIZE else -1
         
-        # Update the hovered column for column removal
+        # Update the hovered column for column removal or gravity off
         game.hovered_column = col
+        game.hovered_row = row
         
         screen.fill(DARK_BLUE)
         
@@ -1128,7 +1285,10 @@ def play_game():
         
         # Draw hover piece if it's player's turn and input isn't locked
         if game.turn == 0 and not game.game_over and not game.lock_player_input:
-            game.draw_hover_piece(screen, col)
+            if game.gravity_off_active:
+                game.draw_hover_piece(screen, col, row)
+            else:
+                game.draw_hover_piece(screen, col)
         
         # Draw powerups and game info
         game.draw_powerups(screen)
@@ -1147,6 +1307,18 @@ def play_game():
                 if game.turn == 0 and game.player_powerups['column_remover'].active and not game.lock_player_input:
                     if hasattr(game, 'column_remover_button_rect') and game.column_remover_button_rect.collidepoint(mouse_pos):
                         game.column_remover_active = not game.column_remover_active
+                        # Deactivate gravity off if it's active
+                        if game.column_remover_active and game.gravity_off_active:
+                            game.gravity_off_active = False
+                        continue  # Skip other checks
+                
+                # Check if gravity off activation/deactivation button was clicked
+                if game.turn == 0 and game.player_powerups['gravity_off'].active and not game.lock_player_input:
+                    if hasattr(game, 'gravity_off_button_rect') and game.gravity_off_button_rect.collidepoint(mouse_pos):
+                        game.gravity_off_active = not game.gravity_off_active
+                        # Deactivate column remover if it's active
+                        if game.gravity_off_active and game.column_remover_active:
+                            game.column_remover_active = False
                         continue  # Skip other checks
                 
                 # Handle column removal
@@ -1164,9 +1336,35 @@ def play_game():
                         game.column_remover_active = False
                         continue  # Skip other checks
                 
-                # Handle player moves
+                # Handle gravity off placement
+                if game.turn == 0 and game.gravity_off_active and 0 <= col < COLS and 0 <= row < ROWS and not game.lock_player_input:
+                    if game.is_valid_location(col, row) and not game.animated_pieces:
+                        # Lock player input during animation and AI turn
+                        game.lock_player_input = True
+                        # Place piece directly at clicked position
+                        success, _ = game.drop_piece(col, game.player_piece, row, True)
+                        
+                        if success:
+                            # Consume the gravity off powerup
+                            game.player_powerups['gravity_off'].deactivate()
+                            game.gravity_off_active = False
+                            
+                            # Wait for animation to complete
+                            if game.check_win(game.player_piece):
+                                game.game_over = True
+                                game.winner = 1
+                            
+                            # Check for powerup after a move
+                            got_powerup, powerup_type = game.check_for_powerup()
+                            
+                            # Set a flag to switch turn after animation completes
+                            game.switch_to_ai_after_animation = True
+                        continue  # Skip other checks
+                
+                # Handle player regular moves
                 if (game.turn == 0 and not game.game_over and not game.column_remover_active 
-                    and 0 <= col < COLS and not game.lock_player_input and not game.animated_pieces):
+                    and not game.gravity_off_active and 0 <= col < COLS and not game.lock_player_input 
+                    and not game.animated_pieces):
                     if game.is_valid_location(col):
                         # Lock player input during animation and AI turn
                         game.lock_player_input = True
@@ -1190,9 +1388,7 @@ def play_game():
                 return  # Return to main menu
         
         # Check if animations are done and we need to switch to AI turn
-        if (hasattr(game, 'switch_to_ai_after_animation') and 
-            game.switch_to_ai_after_animation and 
-            not game.animated_pieces):
+        if (game.switch_to_ai_after_animation and not game.animated_pieces):
             game.turn = 1  # Switch to AI's turn
             game.switch_to_ai_after_animation = False
         
@@ -1207,14 +1403,20 @@ def play_game():
             
             elif not game.ai_thinking and game.ai_move is not None:
                 # AI has made a decision
-                ai_col = game.ai_move
+                ai_col, ai_row = game.ai_move
                 game.ai_move = None
                 
                 if ai_col is not None:  # If AI didn't use a powerup
                     # Add a short delay before AI moves for better UX
                     pygame.time.wait(300)
                     
-                    success, _ = game.drop_piece(ai_col, game.ai_piece)
+                    # For gravity off mode with AI
+                    if ai_row is not None and game.ai_powerups['gravity_off'].active:
+                        success, _ = game.drop_piece(ai_col, game.ai_piece, ai_row, True)
+                        # Consume the gravity off powerup after use
+                        game.ai_powerups['gravity_off'].deactivate()
+                    else:
+                        success, _ = game.drop_piece(ai_col, game.ai_piece)
                     
                     if success:
                         if game.check_win(game.ai_piece):
@@ -1232,9 +1434,7 @@ def play_game():
                     game.switch_to_player_after_animation = True
         
         # Check if AI animations are done and we need to switch back to player
-        if (hasattr(game, 'switch_to_player_after_animation') and 
-            game.switch_to_player_after_animation and 
-            not game.animated_pieces):
+        if (game.switch_to_player_after_animation and not game.animated_pieces):
             game.turn = 0  # Switch to player's turn
             game.lock_player_input = False  # Unlock player input
             game.switch_to_player_after_animation = False
