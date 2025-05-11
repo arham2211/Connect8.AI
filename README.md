@@ -1,6 +1,6 @@
 # Connect8.AI - A Strategic Board Game with Adaptive AI
 
-![Connect8.AI Screenshot](screenshot.png) 
+![Connect8.AI Screenshot](screenshots/connect8.AI.png) 
 
 ## Table of Contents
 - [About](#about)
