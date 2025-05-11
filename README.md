@@ -9,7 +9,6 @@
 - [How to Play](#how-to-play)
 - [Demo](#demo)
 - [Development](#development)
-- [Contributing](#contributing)
 
 ## About
 **Connect8.AI** is a feature-rich evolution of the classic Connect Four game. In this version, players aim to connect **eight** pieces instead of four, compete against a smart AI opponent, and use **power-ups** to gain an edge. Designed with customization, strategy, and fun in mind!
@@ -66,17 +65,6 @@ It contains:
 - User interface (menus, buttons, animations)
 - Power-up handling (activation, placement, constraints)
 
-## Contributing
-Contributions are welcome and appreciated! Feel free to:
-- Report bugs
-- Suggest enhancements
-- Submit pull requests with fixes or features
-
-To contribute:
-1. Fork the repository
-2. Create a new branch (`feature-xyz`)
-3. Commit your changes
-4. Open a pull request
 
 
 
